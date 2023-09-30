@@ -1,0 +1,137 @@
+import numpy as np
+from scipy import signal
+import matplotlib.pyplot as plt
+from scipy.stats import bernoulli,rayleigh
+from numpy.linalg import inv
+from scipy.stats import chi2, norm, chi, f
+import os.path
+from scipy.linalg import sqrtm
+from tabulate import tabulate
+from sklearn.metrics import confusion_matrix
+import scipy.stats as st
+from scipy.stats import wilcoxon, kstest
+from numpy import median
+import random
+from sklearn.preprocessing import normalize
+import scipy.stats as stats
+from scipy.stats import chisquare
+from scipy.stats import t
+
+# Hyper parameters
+N_trakcs = 5000
+No_samples = 8
+SNR_dB = np.linspace(-5,5,11)
+SNR = 10**(SNR_dB/10)
+alpha = 0.05
+r_squared = 1
+mu_u = SNR / r_squared
+
+# Thresholds for a range of SNR from -5 to 5 [dB], with r-squared=1 and alpha=0.05
+thres_EM     = [1.58, 1.03, 0.758, 0.585, 0.493, 0.417, 0.36, 0.32, 0.293]
+thres_MLE_UB = [4.67, 3.12, 2.6, 2.3, 2.15, 2.06, 1.98, 1.9, 1.84]
+
+CM_t_test   = np.zeros((2,2,len(SNR)))
+CM_z_test   = np.zeros((2,2,len(SNR)))
+CM_chi_test = np.zeros((2,2,len(SNR)))
+CM_EM       = np.zeros((2,2,len(SNR)))
+CM_MLE_UB   = np.zeros((2,2,len(SNR)))
+
+y_label_true = np.zeros(N_trakcs)
+
+for j in range(len(SNR)):
+
+  y_label_t_test   = []
+  y_label_z_test   = []
+  y_label_chi_test = []
+  y_label_EM       = []
+  y_label_MLE_UB   = []
+
+  for k in range(N_trakcs):
+
+    w = np.random.randn(No_samples) * np.sqrt(r_squared)
+    x = mu_u[j] * np.ones(No_samples)
+    y = w + x
+
+    y_bar = np.mean(y)
+    y_bar_UB = np.sum(y**2)/(No_samples-1)
+    std = np.std(y,ddof=1)
+    sem = std / np.sqrt(No_samples)
+    
+    # ### t-test ###
+    t = y_bar / sem
+    t_test = st.t.ppf(1 - (alpha/2), No_samples - 1)
+    y_label_t_test.append(np.where(np.abs(t) > t_test, 1, 0))
+
+    # ### z-test ###
+    z = y_bar / (np.sqrt(r_squared))
+    z_test = st.norm.ppf(1 - (alpha/2))/np.sqrt(No_samples)
+    y_label_z_test.append(np.where(np.abs(z) > z_test, 1, 0))
+    
+    # ### chi-test ###
+    chi = (y.transpose() @ y) / (r_squared)
+    chi_test = chi2.isf(alpha, No_samples)
+    y_label_chi_test.append(np.where(chi> chi_test, 1, 0))
+
+    # ### NUV-EM ###
+    gamma_EM = 1
+    for ss in range(20):
+      K = gamma_EM / (gamma_EM  + sem ** 2)
+      gamma_EM = K ** 2 * y_bar ** 2 + K * sem ** 2
+
+    # u = y_bar*gamma_am/(r_squared+gamma_am)
+    y_label_EM.append(np.where(gamma_EM > thres_EM[No_samples-2], 1, 0))
+
+    ### NUV-MLE unbiased ###
+    gamma_MLE = np.maximum(y_bar_UB - sem ** 2, 0)
+    # u = y_bar * gamma_MLE / (r_squared  +gamma_MLE)
+    y_label_MLE_UB.append(np.where(gamma_MLE > thres_MLE_UB[No_samples-2], 1, 0))
+
+  CM_t_test[:,:,j]       = confusion_matrix(y_label_true, y_label_t_test)/N_trakcs
+  CM_z_test[:,:,j]       = confusion_matrix(y_label_true, y_label_z_test)/N_trakcs
+  CM_chi_test[:,:,j]     = confusion_matrix(y_label_true, y_label_chi_test)/N_trakcs
+  CM_EM[:,:,j]           = confusion_matrix(y_label_true, y_label_EM)/N_trakcs
+  CM_MLE_UB[:,:,j]       = confusion_matrix(y_label_true, y_label_MLE_UB)/N_trakcs
+
+
+################# RESULTS #################
+a = 0
+b = 0
+
+# Plot No.1
+plt.figure(figsize=(7,5))
+plt.plot(2*SNR_dB, (CM_chi_test[a,b,:]),'--', color='tab:red',   label=r'$\chi^2-test$ (with known variance)')
+plt.plot(2*SNR_dB, (CM_t_test[a,b,:])  ,'-',  color='tab:orange',label=r'$t-test$  (with unknown variance)')
+plt.plot(2*SNR_dB, (CM_MLE_UB[a,b,:])  ,'s',  color='tab:cyan',  label='MLE-UB (with unknown variance)')
+plt.plot(2*SNR_dB, (CM_EM[a,b,:])      ,'^',  color='tab:pink',  markersize=8, label='NUV-HT-EM')
+plt.plot(2*SNR_dB, (CM_z_test[a,b,:])  ,'--', color='tab:green', label=r'Oracle ($z-test$ with known variance)')
+
+plt.ylabel('Miss detection',fontsize=20)
+plt.xlabel('SNR [dB]',fontsize=20)
+plt.xticks(fontsize=17)
+plt.yticks(fontsize=17)
+plt.xticks(np.arange(-10, 12, 2))
+plt.legend(fontsize=9.5)
+plt.grid()
+plt.tight_layout()
+plt.savefig("BHT_MD.Vs.SNR_NoSamples="+str(int(No_samples))+"_a.pdf", bbox_inches='tight')
+plt.show()
+
+# Plot No.2
+plt.figure(figsize=(7,5))
+
+plt.plot(2*SNR_dB, 10*np.log10(CM_chi_test[a,b,:]),'--', color='tab:red',    label=r'$\chi^2-test$ (with known variance)')
+plt.plot(2*SNR_dB, 10*np.log10(CM_t_test[a,b,:])  ,'-',  color='tab:orange', label=r'$t-test$  (with unknown variance)')
+plt.plot(2*SNR_dB, 10*np.log10(CM_MLE_UB[a,b,:])  ,'s',  color='tab:cyan',   label='MLE-UB (with unknown variance)')
+plt.plot(2*SNR_dB, 10*np.log10(CM_EM[a,b,:])      ,'^',  color='tab:pink',   markersize=6, label='NUV-HT-EM')
+plt.plot(2*SNR_dB, 10*np.log10(CM_z_test[a,b,:])  ,'--', color='tab:green',  label=r'Oracle ($z-test$ with known variance)')
+
+plt.ylabel('Miss detection[dB]',fontsize=20)
+plt.xlabel('SNR [dB]',fontsize=20)
+plt.xticks(fontsize=17)
+plt.yticks(fontsize=17)
+plt.legend(fontsize=9.5)
+plt.xticks(np.arange(-10, 12, 2))
+plt.grid()
+plt.tight_layout()
+plt.savefig("BHT_MD.Vs.SNR_NoSamples="+str(int(No_samples))+"_b.pdf", bbox_inches='tight')
+plt.show()
