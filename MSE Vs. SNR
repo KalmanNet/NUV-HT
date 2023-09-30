@@ -1,0 +1,117 @@
+import numpy as np
+from scipy import signal
+import matplotlib.pyplot as plt
+from scipy.stats import bernoulli,rayleigh
+from numpy.linalg import inv
+from scipy.stats import chi2, norm, chi, f
+import os.path
+from scipy.linalg import sqrtm
+from tabulate import tabulate
+from sklearn.metrics import confusion_matrix
+import scipy.stats as st
+from scipy.stats import wilcoxon, kstest
+from numpy import median
+import random
+from sklearn.preprocessing import normalize
+import scipy.stats as stats
+from scipy.stats import chisquare
+from scipy.stats import t
+
+# Hyper parameters
+N_trakcs = 2000
+No_samples = 3
+SNR_dB = np.linspace(-5,5,11)
+SNR = 10**(SNR_dB/10)
+alpha = 0.05
+r_squared = 1
+mu_u = SNR / r_squared
+
+# Thresholds for a range of SNR from -5 to 5 [dB], with r-squared=1 and alpha=0.05
+thres_EM     = [1.58, 1.03, 0.758, 0.585, 0.493, 0.417, 0.36, 0.32, 0.293]
+thres_MLE_UB = [4.67, 3.12, 2.6, 2.3, 2.15, 2.06, 1.98, 1.9, 1.84]
+# thres_mle_known_variance =[5.27, 3.15, 2.21, 1.83, 1.5, 1.36, 1.32, 1.2, 1.08]
+
+MSE_z_test  = np.zeros(len(SNR))
+MSE_EM      = np.zeros(len(SNR))
+MSE_MLE_UB  = np.zeros(len(SNR))
+
+for j in range(len(SNR)):
+
+  MSE_list_z_test = []
+  MSE_list_EM     = []
+  MSE_list_MLE_UB = []
+
+  for k in range(N_trakcs):
+
+    w = np.random.randn(int(No_samples)) * np.sqrt(r_squared)
+    x = mu_u[j] * np.ones(int(No_samples))
+    y = w + x
+
+    y_bar = np.mean(y)
+    y_bar_UB = np.sum(y ** 2) / (No_samples - 1)
+    std = np.std(y,ddof=1)
+    sem = std / np.sqrt(No_samples)
+
+    # ### z-test ###
+    z = y_bar / (np.sqrt(r_squared))
+    z_test = st.norm.ppf(1 - (alpha / 2)) / np.sqrt(No_samples)
+    mse_z_test = np.mean((y_bar - mu_u[j]) ** 2)
+    MSE_list_z_test.append(mse_z_test)
+
+    # ### NUV_EM ###
+    gamma_EM = 1
+    for i in range (50):
+      K = gamma_EM / (gamma_EM  + sem ** 2)
+      gamma_EM = K ** 2 * y_bar ** 2 + K * sem ** 2
+
+    u_EM = y_bar  * gamma_EM / (sem ** 2 + gamma_EM)
+    mse_EM =  ((u_EM - mu_u[j]) ** 2)
+    MSE_list_EM.append(mse_EM)
+
+    ### NUV-MLE unbiased ###
+    gamma_MLE = np.maximum(y_bar_UB - sem ** 2, 0)
+    u_MLE = y_bar * gamma_MLE / (sem ** 2 + gamma_MLE)
+    mse_MLE_UB =  ((u_MLE - mu_u[j]) ** 2)
+    MSE_list_MLE_UB.append(mse_MLE_UB)
+
+  MSE_z_test[j] = np.mean(np.array(MSE_list_z_test))
+  MSE_EM[j]     = np.mean(np.array(MSE_list_EM))
+  MSE_MLE_UB[j] = np.mean(np.array(MSE_list_MLE_UB))
+
+################# RESULTS #################
+a = 0
+b = 0
+
+# Plot No.1
+plt.figure(figsize=(7,5))
+
+plt.plot(2*SNR_dB, (MSE_MLE_UB) ,'-o', color='tab:pink',  markersize=8, label='MLE unbiased')
+plt.plot(2*SNR_dB, (MSE_EM)     ,'-^', color='tab:cyan',  markersize=8, label='NUV-EM')
+plt.plot(2*SNR_dB, (MSE_z_test) ,'--', color='tab:green', markersize=10, label='z - test')
+
+plt.ylabel('MSE',fontsize=20)
+plt.xlabel('SNR [dB]',fontsize=20)
+plt.xticks(fontsize=17)
+plt.yticks(fontsize=17)
+plt.legend(fontsize=14)
+plt.grid()
+plt.tight_layout()
+plt.savefig("BHT_MSE.Vs.SNR_NoSamples="+str(int(No_samples))+"_a.pdf", bbox_inches='tight')
+plt.show()
+
+# Plot No.2
+plt.figure(figsize=(7,5))
+
+plt.plot(2*SNR_dB, 10*np.log10(MSE_MLE_UB) ,'o-', color='tab:pink', markersize=8, label='MLE_unbiased')
+plt.plot(2*SNR_dB, 10*np.log10(MSE_EM)     ,'^-', color='tab:cyan', markersize=8, label='NUV-EM')
+plt.plot(2*SNR_dB, 10*np.log10(MSE_z_test) ,'--', color='tab:green', markersize=10, label='z-test')
+
+plt.ylabel('MSE [dB]',fontsize=20)
+plt.xlabel('SNR [dB]',fontsize=20)
+plt.xticks(fontsize=17)
+plt.yticks(fontsize=17)
+plt.legend(fontsize=14)
+plt.grid()
+plt.tight_layout()
+plt.savefig("BHT_MSE.Vs.SNR_NoSamples="+str(int(No_samples))+"_b.pdf", bbox_inches='tight')
+plt.show()
